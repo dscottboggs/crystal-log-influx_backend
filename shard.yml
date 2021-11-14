@@ -1,0 +1,9 @@
+name: log-influx_backend
+version: 0.1.0
+
+authors:
+  - D. Scott Boggs <scott@tams.tech>
+
+crystal: 1.2.1
+
+license: MIT
