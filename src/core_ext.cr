@@ -12,8 +12,21 @@ struct ::Time
   end
 end
 
-struct ::Log::Metadata::Value
-  def to_json(builder : JSON::Builder)
-    raw.to_json builder
+class ::Log
+  class Metadata
+    struct Value
+      def to_json(builder : JSON::Builder)
+        raw.to_json builder
+      end
+    end
+
+    def to_json(builder : JSON::Builder)
+      builder.object do
+        each do |k, v|
+          # key is a Symbol, cast as String
+          builder.field k.to_s, v
+        end
+      end
+    end
   end
 end

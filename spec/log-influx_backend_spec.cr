@@ -1,60 +1,67 @@
+require "yaml"
 require "./spec_helper"
+require "../src/log-influx_backend"
 
-macro test_format_field(value, renders_to expected)
-  String.build do |str|
-    Log::InfluxBackend.format_field str, {{value}}
-  end.should eq {{expected}}
-end
+config = File.open "spec-config.yml", &->YAML.parse(File)
 
-describe Log::InfluxBackend do
-  # TODO: Write tests
+query_headers = HTTP::Headers.new.merge!({
+  "Content-Type" => "application/vnd.flux",
+  "Accept"       => "application/csv",
+})
 
-  describe ".tag_value_escape" do
-    Log::InfluxBackend.tag_escape("test text=something, else").should eq "test\\ text\\=something\\,\\ else"
-  end
+class ::Log
+  describe InfluxBackend do
+    it "writes data to the database" do
+      start = Time.utc
+      backend = InfluxBackend.new config["token"].as_s,
+        config["org"].as_s,
+        config["bucket"].as_s,
+        config["location"]?.try(&.as_s) || "http://localhost:8086/"
+      entry = Entry.new source: "log.influx_backend.spec",
+        severity: :info,
+        message: "test log entry",
+        data: Metadata.build({test: "data"}),
+        exception: nil
+      backend.write entry
+      sleep 0.1 # allow influx time to write the data...Influx writes are async
+      # so there isn't really a better way to handle this.
 
-  describe ".format_field" do
-    it "formats a floating point value" do
-      test_format_field 1_f64, renders_to: "1.0"
-      test_format_field 1_f32, renders_to: "1.0"
-      test_format_field Float64::MAX, renders_to: "1.7976931348623157e+308"
-      test_format_field Float64::EPSILON, renders_to: "2.220446049250313e-16"
-      test_format_field Float64::NAN, renders_to: "NaN"
-      test_format_field Float64::INFINITY, renders_to: "Infinity"
-    end
+      # params for read query
+      params = URI::Params.encode({
+        org: backend.config.org,
+      })
 
-    it "formats a signed integer field" do
-      test_format_field 1_i32, renders_to: "1i"
-      test_format_field 1_i64, renders_to: "1i"
-    end
+      # read written data from the db
+      result = backend.client.post "/api/v2/query?#{params}",
+        headers: query_headers,
+        body: %[
+          from(bucket: "#{backend.config.bucket}")
+            |>range(start: #{start.to_rfc3339})
+        ]
+      body = result.body? || result.body_io?.try &.gets_to_end
+      result.success?.should be_true
+      body.should_not be_nil
 
-    it "formats an unsigned integer field" do
-      # Log::InfluxBackend.format_field(1_u32).should eq "1u"
-      # Log::InfluxBackend.format_field(1_u64).should eq "1u"
-    end
-    it "formats a boolean value" do
-      test_format_field true, renders_to: "true"
-      test_format_field false, renders_to: "false"
-    end
-    it "formats a Time value" do
-      test_format_field Time::UNIX_EPOCH, renders_to: "1970-01-01T00:00:00Z"
-    end
-    it "formats a nil value" do
-      test_format_field nil, renders_to: ""
-    end
-    it "formats a string" do
-      test_format_field "test", renders_to: %["test"]
-    end
-    it "formats an array of values" do
-      test_format_field [1], renders_to: %<"[1]">
-      test_format_field [1, 2, 3], renders_to: %["[1,2,3]"]
-    end
-    it "formats a hash table" do
-      test_format_field({"one" => 1}, renders_to: %q<"{\"one\":1}">)
-    end
-    it "formats a Metadata::Value which is a hash table" do
-      s : ::Log::Metadata::Value = ::Log::Metadata.build({test: {one: 1, two: 2}})[:test]
-      test_format_field s, renders_to: %q["{\"one\":1,\"two\":2}"]
+      # check the contents of the query result for the expected values
+      lines = body.not_nil!.split "\r\n"
+      lines.size.should eq 5
+      lines[0].should eq ",result,table,_start,_stop,_time,_value,_field,_measurement,context,severity"
+      lines[1..2].each do |line|
+        columns = line.split ','
+        columns.size.should eq 11
+        %w[message test].should contain columns[7]
+        columns[6].should eq "test log entry" if columns[7] == "message"
+        columns[6].should eq "data" if columns[7] == "test"
+      end
+      lines[3].empty?.should be_true
+      lines[4].empty?.should be_true
+
+      # if we've gotten this far, might as well clean up after the successful run.
+      result = backend.client.post "/api/v2/delete?#{URI::Params.encode({"bucket" => backend.config.bucket, "org" => backend.config.org})}",
+        headers: HTTP::Headers.new.merge!({"Content-Type" => "applicaiton/json"}),
+        body: {start: start.to_rfc3339, stop: Time.utc.to_rfc3339}.to_json
+      result.success?.should be_true
+      result.body.empty?.should be_true
     end
   end
 end
