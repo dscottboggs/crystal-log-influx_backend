@@ -1,6 +1,6 @@
-# log-influx_backend
-
-TODO: Write a description here
+# InfluxDB backend for Crystal's Logger
+The Crystal standard library contains a configurable logging mechanism. This
+allows that to be output to InfluxDB.
 
 ## Installation
 
@@ -9,26 +9,44 @@ TODO: Write a description here
    ```yaml
    dependencies:
      log-influx_backend:
-       github: your-github-user/log-influx_backend
+       github: dscottboggs/crystal-log-influx_backend
    ```
 
 2. Run `shards install`
 
 ## Usage
 
-```crystal
+```crystal 
+require "log"
 require "log-influx_backend"
+
+Log.setup backend: Log::InfluxBackend.new token: "your config token",
+  org: "your organization",
+  bucket: "some bucket"
+
+Log.info &.emit "a log message!", cpu_count: System.cpu_count
 ```
 
-TODO: Write usage instructions here
+The log entry's severity, context, and source are formatted as "tags", while
+the log message and any metadata are logged as fields.
 
 ## Development
+### Running tests
+Before the integration test will run, you need to write a config file in the
+project directory.
 
-TODO: Write development instructions here
+```
+cat <<-YAML > spec-config.yml
+token: (your API token goes here -- found in /etc/influxdb2/influx-configs wherever the influx service is running)
+org: some-org
+bucket: log-influx_backend.spec
+
+YAML
+```
 
 ## Contributing
 
-1. Fork it (<https://github.com/your-github-user/log-influx_backend/fork>)
+1. Fork it (<https://github.com/dscottboggs/log-influx_backend/fork>)
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
@@ -36,4 +54,4 @@ TODO: Write development instructions here
 
 ## Contributors
 
-- [D. Scott Boggs](https://github.com/your-github-user) - creator and maintainer
+- [D. Scott Boggs](https://github.com/dscottboggs) - creator and maintainer
